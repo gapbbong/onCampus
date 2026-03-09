@@ -1,0 +1,139 @@
+:root {
+  --primary: #4f46e5;
+  --primary-hover: #4338ca;
+  --secondary: #101827;
+  --accent: #06b6d4;
+  --background: #030712;
+  --surface: #111827;
+  --surface-hover: #1f2937;
+  --text-primary: #f9fafb;
+  --text-secondary: #9ca3af;
+  --text-muted: #6b7280;
+  --error: #ef4444;
+  --success: #10b981;
+  --warning: #f59e0b;
+  --glass: rgba(17, 24, 39, 0.7);
+  --glass-border: rgba(255, 255, 255, 0.1);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+  --font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  --temp-hot: #f97316;
+  --temp-cool: #3b82f6;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: var(--font-family);
+  background: var(--background);
+  color: var(--text-primary);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+
+button {
+  cursor: pointer;
+  border: none;
+  font-family: inherit;
+  transition: all 0.2s ease;
+}
+
+input {
+  font-family: inherit;
+  font-size: 1rem;
+}
+
+.glass-card {
+  background: var(--glass);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--glass-border);
+  border-radius: 1rem;
+  box-shadow: var(--shadow-lg);
+}
+
+.premium-gradient {
+  background: linear-gradient(135deg, var(--primary), var(--accent));
+}
+
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 1.5rem;
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.fade-in {
+  animation: fadeIn 0.5s ease forwards;
+}
+
+/* Heat Map Effect for Temperature */
+.temp-gauge {
+  height: 8px;
+  width: 100%;
+  border-radius: 4px;
+  background: #1f2937;
+  overflow: hidden;
+  position: relative;
+}
+
+.temp-fill {
+  height: 100%;
+  transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+  background: linear-gradient(to right, var(--temp-cool), var(--temp-hot));
+}
+
+
+.app {
+  min-height: 100vh;
+}
+
+.mode-toggle {
+  position: fixed;
+  bottom: 2rem;
+  right: 2rem;
+  padding: 0.75rem 1.5rem;
+  background: var(--surface);
+  border: 1px solid var(--glass-border);
+  color: var(--text-secondary);
+  border-radius: 2rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  z-index: 10000;
+}
+
+.mode-toggle:hover {
+  background: var(--surface-hover);
+  color: white;
+}
+
+.badge {
+  background: var(--primary);
+  color: white;
+  padding: 0.25rem 0.75rem;
+  border-radius: 1rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.success {
+  color: var(--success);
+}
