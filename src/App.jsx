@@ -7,13 +7,48 @@ import { mockSchoolInfo, mockCurriculum } from './lib/mockData';
 import { Settings as SettingsIcon } from 'lucide-react';
 import './styles/index.css';
 
+// ---------------------------------------------------------
+// 구글 앱스 스크립트(GAS) 웹 앱 URL을 여기에 넣으세요!
+// ---------------------------------------------------------
+const GOOGLE_SHEET_URL = "https://script.google.com/macros/s/AKfycbytv9B8DqxTf65K0NgggHhlnaAqJYshGvzhHvWu_Pm7QewRgUFRKnxtGyzNtnxqWb03/exec";
+
 function App() {
-  const [user, setUser] = useState(() => {
-    const saved = localStorage.getItem('oncampus_student_user');
+  const [studentInfo, setStudentInfo] = useState(() => {
+    const saved = localStorage.getItem('oncampus_student_info');
     return saved ? JSON.parse(saved) : null;
   });
+
+  const [activeSession, setActiveSession] = useState(null);
   const [isTeacherMode, setIsTeacherMode] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [isIdle, setIsIdle] = useState(false);
+
+  // --- Idle Detection (1 minute) ---
+  useEffect(() => {
+    let idleTimer;
+    const resetTimer = () => {
+      setIsIdle(false);
+      clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => setIsIdle(true), 60000); // 60 seconds
+    };
+
+    window.addEventListener('mousemove', resetTimer);
+    window.addEventListener('keydown', resetTimer);
+    window.addEventListener('mousedown', resetTimer);
+    window.addEventListener('touchstart', resetTimer);
+
+    resetTimer(); // Start initial timer
+
+    return () => {
+      window.removeEventListener('mousemove', resetTimer);
+      window.removeEventListener('keydown', resetTimer);
+      window.removeEventListener('mousedown', resetTimer);
+      window.removeEventListener('touchstart', resetTimer);
+      clearTimeout(idleTimer);
+    };
+  }, []);
+
+
   const [schoolSettings, setSchoolSettings] = useState(() => {
     const saved = localStorage.getItem('oncampus_school_settings');
     return saved ? JSON.parse(saved) : {
@@ -21,8 +56,7 @@ function App() {
       school_level: '고등학교',
       student_id_len: '5',
       department: '인공지능과',
-      manager_email: 'teacher@school.net',
-      kakao_id: 'oncampus_help'
+      school_name: '온캠퍼스 고등학교'
     };
   });
 
@@ -30,131 +64,106 @@ function App() {
     localStorage.setItem('oncampus_school_settings', JSON.stringify(schoolSettings));
   }, [schoolSettings]);
 
-  const handleStudentLogin = (data) => {
-    const userData = { ...data, type: 'student', temperature: 0 };
-    setUser(userData);
-    localStorage.setItem('oncampus_student_user', JSON.stringify(userData));
+  const handleLogin = (data) => {
+    const info = { studentId: data.studentId, name: data.name };
+    setStudentInfo(info);
+    localStorage.setItem('oncampus_student_info', JSON.stringify(info));
+    setActiveSession({ ...info, subject: data.subject, temperature: 0 });
   };
 
-
-  const handleLearningComplete = (stats) => {
-    alert('학습을 성공적으로 마쳤습니다! 온도와 점수가 저장되었습니다.');
-    console.log('Final Stats:', stats);
+  const handleLogout = () => {
+    if (confirm('로그아웃 하시겠습니까? 저장된 정보가 삭제됩니다.')) {
+      setStudentInfo(null);
+      setActiveSession(null);
+      localStorage.removeItem('oncampus_student_info');
+    }
   };
 
-  const toggleMode = () => {
-    setIsTeacherMode(!isTeacherMode);
-    setUser(null);
-  };
+  const handleLearningComplete = async (stats) => {
+    // 저장할 데이터 패키지 (만능 시트이므로 필요한 항목을 마음껏 추가하세요)
+    const payload = {
+      "날짜": new Date().toLocaleString(),
+      "학번": activeSession.studentId,
+      "이름": activeSession.name,
+      "과목": activeSession.subject,
+      "최종온도": stats.temperature,
+      "실기일치율": (stats.typingStats.reduce((a, b) => a + b, 0) / (stats.typingStats.length || 1) * 100).toFixed(1) + "%",
+      "퀴즈점수": (stats.results.filter(r => r.correct).length / (stats.results.length || 1) * 100).toFixed(0) + "점",
+      "학교": schoolSettings.school_name
+    };
 
-  const handleSaveSettings = (newSettings) => {
-    setSchoolSettings(newSettings);
+    try {
+      // 구글 시트로 데이터 전송
+      await fetch(GOOGLE_SHEET_URL, {
+        method: "POST",
+        mode: "no-cors", // 중요: CORS 오류 방지
+        cache: "no-cache",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+
+      alert('학습 데이터가 구글 스프레드시트에 안전하게 저장되었습니다! 🎓');
+      setActiveSession(null);
+    } catch (error) {
+      console.error('Save Error:', error);
+      alert('저장 중 오류가 발생했습니다. 네트워크를 확인해주세요.');
+    }
   };
 
   const renderContent = () => {
     if (isTeacherMode) {
+      return <TeacherDashboard schoolData={schoolSettings} initialCurriculum={mockCurriculum} />;
+    }
+
+    if (!activeSession) {
       return (
-        <TeacherDashboard
-          schoolData={schoolSettings}
-          initialCurriculum={mockCurriculum}
-          apiKey={import.meta.env.VITE_GEMINI_API_KEY}
+        <StudentLogin
+          onLogin={handleLogin}
+          schoolInfo={schoolSettings}
+          existingInfo={studentInfo}
+          onLogout={handleLogout}
         />
       );
     }
 
-    if (!user) {
-      return <StudentLogin onLogin={handleStudentLogin} schoolInfo={schoolSettings} />;
-    }
-
     return (
       <LearningEngine
-        studentData={user}
+        studentData={activeSession}
         curriculum={mockCurriculum[0]}
         questions={mockCurriculum[0].questions}
         onComplete={handleLearningComplete}
+        onBack={() => setActiveSession(null)}
+        onLogout={handleLogout}
       />
     );
   };
 
   return (
-    <div className="app">
+    <div className={`app ${isIdle ? 'idle-blink' : ''}`}>
       {renderContent()}
 
+
       <div className="app-controls">
-        <button
-          className="settings-toggle"
-          onClick={() => setShowSettings(true)}
-          title="학교 설정"
-        >
+        <button className="settings-toggle" onClick={() => setShowSettings(true)}>
           <SettingsIcon size={20} />
           <span className="school-name-badge">{schoolSettings.school_name}</span>
         </button>
 
-        <button className="mode-toggle" onClick={toggleMode}>
-          {isTeacherMode ? '학생 모드로 전환' : '교사 모드로 전환'}
-        </button>
+        {(isTeacherMode || activeSession?.studentId === '7788' || studentInfo?.studentId === '7788') && (
+          <button className="mode-toggle" onClick={() => setIsTeacherMode(!isTeacherMode)}>
+            {isTeacherMode ? '학생 모드로 전환' : '교사 모드로 전환'}
+          </button>
+        )}
       </div>
+
 
       {showSettings && (
         <SchoolSettingsModal
           settings={schoolSettings}
-          onSave={handleSaveSettings}
+          onSave={(s) => setSchoolSettings(s)}
           onClose={() => setShowSettings(false)}
         />
       )}
-
-      <style>{`
-        .app-controls {
-          position: fixed;
-          bottom: 0;
-          left: 0;
-          right: 0;
-          padding: 2rem;
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          pointer-events: none;
-          z-index: 10000;
-        }
-
-        .settings-toggle, .mode-toggle {
-          pointer-events: auto;
-        }
-
-        .settings-toggle {
-          display: flex;
-          align-items: center;
-          gap: 0.75rem;
-          padding: 0.75rem 1.25rem;
-          background: var(--surface);
-          border: 1px solid var(--glass-border);
-          color: var(--text-secondary);
-          border-radius: 2rem;
-          font-size: 0.875rem;
-          transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-        }
-
-        .settings-toggle:hover {
-          background: var(--surface-hover);
-          color: white;
-          transform: translateY(-2px);
-          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-        }
-
-        .school-name-badge {
-          max-width: 150px;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-          font-weight: 500;
-        }
-
-        @media (max-width: 640px) {
-          .school-name-badge {
-            display: none;
-          }
-        }
-      `}</style>
     </div>
   );
 }

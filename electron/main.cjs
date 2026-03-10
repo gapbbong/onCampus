@@ -41,10 +41,6 @@ function createWindow() {
     Menu.setApplicationMenu(menu);
 
 
-    mainWindow.webContents.on('context-menu', (e) => {
-        e.preventDefault();
-    });
-
     mainWindow.on('closed', () => {
         mainWindow = null;
     });
@@ -55,8 +51,6 @@ app.whenReady().then(() => {
 
     if (!isDev) {
         const shortcuts = [
-            'CommandOrControl+C',
-            'CommandOrControl+V',
             'CommandOrControl+R',
             'F5',
             'F12',

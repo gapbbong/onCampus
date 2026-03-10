@@ -137,3 +137,23 @@ input {
 .success {
   color: var(--success);
 }
+
+/* Idle Blinking Animation */
+.idle-blink {
+  animation: idle-pulse 1s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes idle-pulse {
+
+  0%,
+  100% {
+    opacity: 1;
+    filter: brightness(1);
+  }
+
+  50% {
+    opacity: 0.6;
+    filter: brightness(1.2) saturate(1.1);
+  }
+}

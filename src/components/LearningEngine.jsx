@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Thermometer, Award, ArrowRight, CheckCircle2, AlertTriangle, ShieldCheck } from 'lucide-react';
+import { Thermometer, Award, ArrowRight, ArrowLeft, CheckCircle2, AlertTriangle, ShieldCheck, LogOut } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAntiCheat } from '../hooks/useAntiCheat';
+import { supabase } from '../lib/supabase';
 
-const LearningEngine = ({ studentData, curriculum, questions, onComplete }) => {
+const LearningEngine = ({ studentData, curriculum, questions, onComplete, onBack }) => {
     const [currentStep, setCurrentStep] = useState('typing'); // 'typing' or 'quiz'
     const [typingRound, setTypingRound] = useState(1);
     const [inputText, setInputText] = useState('');
@@ -19,6 +20,77 @@ const LearningEngine = ({ studentData, curriculum, questions, onComplete }) => {
     // Constants from curriculum
     const targetRepetitions = curriculum.typing_repetitions || 2;
     const targetAccuracy = curriculum.min_similarity || 0.93;
+
+    // --- Real-time Session Sync & Global Event Blockers ---
+    useEffect(() => {
+        const isTestAccount = studentData.studentId === '7788' && studentData.name === '홍길동';
+
+        // Block event handler
+        const handlePrevention = (e) => {
+            if (!isTestAccount) {
+                e.preventDefault();
+                // Optionally show a message? But alert might be too annoying.
+            }
+        };
+
+        // Keydown handler to block Ctrl+C, Ctrl+V, etc.
+        const handleKeyDown = (e) => {
+            if (isTestAccount) return;
+            if ((e.ctrlKey || e.metaKey) && (e.key === 'c' || e.key === 'v' || e.key === 'x')) {
+                e.preventDefault();
+            }
+        };
+
+        window.addEventListener('paste', handlePrevention);
+        window.addEventListener('copy', handlePrevention);
+        window.addEventListener('contextmenu', handlePrevention);
+        window.addEventListener('keydown', handleKeyDown);
+
+        const updateSession = async () => {
+            const { error } = await supabase
+                .from('active_sessions')
+                .upsert({
+                    student_id: studentData.studentId,
+                    student_name: studentData.name,
+                    subject: curriculum.title,
+                    current_step: currentStep,
+                    current_round: typingRound,
+                    accuracy: currentAccuracy,
+                    last_active: new Date().toISOString()
+                }, { onConflict: 'student_id' });
+        };
+
+        const interval = setInterval(updateSession, 5000);
+        updateSession();
+
+        const channel = supabase
+            .channel(`session_${studentData.studentId}`)
+            .on('postgres_changes', {
+                event: 'UPDATE',
+                schema: 'public',
+                table: 'active_sessions',
+                filter: `student_id=eq.${studentData.studentId}`
+            }, (payload) => {
+                if (payload.new.force_next_signal) {
+                    if (currentStep === 'typing') {
+                        handleTypingNext(true);
+                    } else if (currentStep === 'quiz') {
+                        onComplete({ temperature: temperature + 10, typingStats: [...typingStats, 1], results: results.length ? results : [{ correct: true }] });
+                    }
+                    supabase.from('active_sessions').update({ force_next_signal: false }).eq('student_id', studentData.studentId).then();
+                }
+            })
+            .subscribe();
+
+        return () => {
+            clearInterval(interval);
+            supabase.removeChannel(channel);
+            window.removeEventListener('paste', handlePrevention);
+            window.removeEventListener('copy', handlePrevention);
+            window.removeEventListener('contextmenu', handlePrevention);
+            window.removeEventListener('keydown', handleKeyDown);
+        };
+    }, [currentStep, typingRound, currentAccuracy, studentData]);
 
     // Intelligent similarity calculation (Levenshtein Distance)
     const calculateAccuracy = (input, target) => {
@@ -86,22 +158,24 @@ const LearningEngine = ({ studentData, curriculum, questions, onComplete }) => {
     }, [inputText, currentStep]);
 
 
-    const handleTypingNext = () => {
-        if (currentAccuracy < targetAccuracy) {
+    const handleTypingNext = (isForced = false) => {
+        if (!isForced && currentAccuracy < targetAccuracy) {
             alert(`일치율이 ${(targetAccuracy * 100).toFixed(0)}% 미만입니다. 공백을 제외한 실제 글자를 더 정확하게 입력해주세요!`);
             return;
         }
 
-        setTypingStats([...typingStats, currentAccuracy]);
+        const finalAccuracy = isForced ? 1.0 : currentAccuracy;
+        setTypingStats([...typingStats, finalAccuracy]);
 
         if (typingRound < targetRepetitions) {
             setTypingRound(typingRound + 1);
             setInputText('');
             setCurrentStep('quiz');
         } else {
-            onComplete({ temperature, typingStats, results });
+            onComplete({ temperature, typingStats: [...typingStats, finalAccuracy], results });
         }
     };
+
 
     const handleQuizComplete = (quizResults) => {
         setResults(quizResults);
@@ -145,8 +219,12 @@ const LearningEngine = ({ studentData, curriculum, questions, onComplete }) => {
 
             <nav className="engine-nav glass-card">
                 <div className="nav-left">
-                    <span className="badge">{curriculum.title}</span>
+                    <button onClick={onBack} className="nav-back-btn" title="뒤로 가기">
+                        <ArrowLeft size={20} />
+                    </button>
+                    <span className="unit-title">{curriculum.title}</span>
                 </div>
+
                 <div className="nav-center">
                     <div className="temp-container">
                         <Thermometer size={18} color={temperature > 500 ? 'var(--temp-hot)' : 'var(--temp-cool)'} />
@@ -158,6 +236,9 @@ const LearningEngine = ({ studentData, curriculum, questions, onComplete }) => {
                 </div>
                 <div className="nav-right">
                     <span className="student-name">{studentData.name} ({studentData.studentId})</span>
+                    <button onClick={onBack} className="nav-logout-btn" title="로그아웃">
+                        <LogOut size={16} />
+                    </button>
                 </div>
             </nav>
 
@@ -229,12 +310,103 @@ const LearningEngine = ({ studentData, curriculum, questions, onComplete }) => {
           color: white;
         }
 
+        .engine-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 2rem;
+        }
+
+        .header-actions {
+          display: flex;
+          align-items: center;
+          gap: 1.5rem;
+        }
+
+        .skip-button {
+          background: rgba(255, 255, 255, 0.05);
+          border: 1px solid var(--glass-border);
+          padding: 0.5rem 1rem;
+          border-radius: 2rem;
+          font-size: 0.825rem;
+          color: var(--text-muted);
+          transition: all 0.2s;
+        }
+
+        .skip-button:hover {
+          background: rgba(255, 255, 255, 0.1);
+          color: white;
+          transform: translateY(-1px);
+        }
+
         .engine-nav {
           display: flex;
           justify-content: space-between;
           align-items: center;
-          padding: 1rem 2rem;
+          padding: 1rem 1.5rem;
           margin-bottom: 2rem;
+        }
+
+        .nav-right {
+          display: flex;
+          align-items: center;
+          gap: 1rem;
+        }
+
+        .nav-logout-btn {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          padding: 0.5rem;
+          color: var(--text-muted);
+          background: rgba(255, 255, 255, 0.05);
+          border: 1px solid var(--glass-border);
+          border-radius: 0.5rem;
+          transition: all 0.2s;
+        }
+
+        .nav-logout-btn:hover {
+          color: var(--error);
+          background: rgba(239, 68, 68, 0.1);
+          border-color: rgba(239, 68, 68, 0.2);
+        }
+
+        .student-name {
+          font-weight: 500;
+          color: var(--text-secondary);
+        }
+
+        .nav-left {
+          display: flex;
+          align-items: center;
+        }
+
+        .unit-title {
+          font-size: 1.25rem;
+          font-weight: 600;
+          color: white;
+          letter-spacing: 0.02em;
+        }
+
+        .nav-back-btn {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 40px;
+          height: 40px;
+          margin-right: 1rem;
+          color: var(--text-secondary);
+          background: rgba(255, 255, 255, 0.05);
+          border: 1px solid var(--glass-border);
+          border-radius: 0.75rem;
+          transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .nav-back-btn:hover {
+          color: white;
+          background: rgba(255, 255, 255, 0.1);
+          border-color: rgba(255, 255, 255, 0.2);
+          transform: translateX(-4px);
         }
 
         .temp-container {

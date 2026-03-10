@@ -1,12 +1,47 @@
-import React, { useState } from 'react';
-import { Settings, Users, BookOpen, Sparkles, Plus, Save, Trash2 } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Settings, Users, BookOpen, Sparkles, Plus, Save, Trash2, ArrowBigRight } from 'lucide-react';
 import { generateExplanation } from '../lib/gemini';
+import { supabase } from '../lib/supabase';
 import '../styles/index.css';
 
 const TeacherDashboard = ({ schoolData, initialCurriculum, apiKey }) => {
     const [activeTab, setActiveTab] = useState('curriculum');
     const [curriculum, setCurriculum] = useState(initialCurriculum || []);
     const [isGenerating, setIsGenerating] = useState(false);
+    const [activeStudents, setActiveStudents] = useState([]);
+
+    // --- Real-time Student Monitoring ---
+    useEffect(() => {
+        if (activeTab === 'students') {
+            const fetchStudents = async () => {
+                const { data } = await supabase
+                    .from('active_sessions')
+                    .select('*')
+                    .order('last_active', { ascending: false });
+                if (data) setActiveStudents(data);
+            };
+
+            fetchStudents();
+
+            const subscription = supabase
+                .channel('monitor_students')
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'active_sessions' }, (payload) => {
+                    fetchStudents();
+                })
+                .subscribe();
+
+            return () => supabase.removeChannel(subscription);
+        }
+    }, [activeTab]);
+
+    const handleForceNext = async (studentId) => {
+        const { error } = await supabase
+            .from('active_sessions')
+            .update({ force_next_signal: true })
+            .eq('student_id', studentId);
+
+        if (error) alert('신호 전송 실패!');
+    };
 
     const handleAddQuestion = (chapterId) => {
         const newChapter = curriculum.map(ch => {
@@ -69,7 +104,7 @@ const TeacherDashboard = ({ schoolData, initialCurriculum, apiKey }) => {
 
             <main className="dashboard-main">
                 <header className="main-header">
-                    <h1>{activeTab === 'curriculum' ? '교육과정 설정' : '대시보드'}</h1>
+                    <h1>{activeTab === 'curriculum' ? '교육과정 설정' : activeTab === 'students' ? '학생 실시간 모니터링' : '환경 설정'}</h1>
                     <button className="save-btn premium-gradient"><Save size={18} /> 전체 저장</button>
                 </header>
 
@@ -120,8 +155,63 @@ const TeacherDashboard = ({ schoolData, initialCurriculum, apiKey }) => {
                             ))}
                         </div>
                     )}
+
+                    {activeTab === 'students' && (
+                        <div className="monitoring-list glass-card">
+                            <table className="student-table">
+                                <thead>
+                                    <tr>
+                                        <th>상태</th>
+                                        <th>학번</th>
+                                        <th>이름</th>
+                                        <th>진행 단계</th>
+                                        <th>정확도</th>
+                                        <th>제어</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {activeStudents.map(student => (
+                                        <tr key={student.student_id}>
+                                            <td><span className="dot online"></span></td>
+                                            <td>{student.student_id}</td>
+                                            <td>{student.student_name}</td>
+                                            <td>
+                                                {student.current_step === 'typing' ? `따라쓰기 (${student.current_round}회차)` : '문제 풀이'}
+                                            </td>
+                                            <td>
+                                                <div className="progress-bar-small">
+                                                    <div
+                                                        className="progress-fill"
+                                                        style={{ width: `${(student.accuracy * 100).toFixed(0)}%` }}
+                                                    />
+                                                    <span className="p-text">{(student.accuracy * 100).toFixed(0)}%</span>
+                                                </div>
+                                            </td>
+                                            <td>
+                                                <button
+                                                    className="skip-btn"
+                                                    onClick={() => handleForceNext(student.student_id)}
+                                                    title="다음 단계로 강제 이동"
+                                                >
+                                                    <ArrowBigRight size={16} /> 단계 넘기기
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                    {activeStudents.length === 0 && (
+                                        <tr>
+                                            <td colSpan="6" style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)' }}>
+                                                현재 접속 중인 학생이 없습니다.
+                                            </td>
+                                        </tr>
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
                 </section>
             </main>
+
 
             <style>{`
         .dashboard-layout { display: grid; grid-template-columns: 280px 1fr; height: 100vh; background: #030712; }
@@ -155,6 +245,25 @@ const TeacherDashboard = ({ schoolData, initialCurriculum, apiKey }) => {
         
         .add-q-btn { width: 100%; padding: 1rem; border: 1px dashed var(--text-muted); border-radius: 0.75rem; background: transparent; color: var(--text-muted); display: flex; align-items: center; justify-content: center; gap: 0.5rem; }
         .add-q-btn:hover { border-color: var(--primary); color: var(--primary); }
+        .monitoring-list { padding: 0; overflow: hidden; }
+        .student-table { width: 100%; border-collapse: collapse; text-align: left; }
+        .student-table th { padding: 1.25rem 1.5rem; background: rgba(255,255,255,0.05); color: var(--text-secondary); font-size: 0.875rem; font-weight: 600; }
+        .student-table td { padding: 1.25rem 1.5rem; border-bottom: 1px solid var(--glass-border); color: white; vertical-align: middle; }
+        
+        .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; }
+        .dot.online { background: var(--success); box-shadow: 0 0 10px var(--success); }
+        
+        .progress-bar-small { width: 120px; height: 8px; background: rgba(255,255,255,0.1); border-radius: 4px; position: relative; display: flex; align-items: center; }
+        .progress-fill { height: 100%; background: var(--primary); border-radius: 4px; transition: width 0.3s ease; }
+        .p-text { position: absolute; right: -45px; font-size: 0.75rem; color: var(--text-secondary); }
+
+        .skip-btn {
+          display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 1rem;
+          background: rgba(79, 70, 229, 0.1); border: 1px solid rgba(79, 70, 229, 0.3);
+          border-radius: 0.5rem; color: var(--primary); font-size: 0.825rem; font-weight: 600;
+          transition: all 0.2s;
+        }
+        .skip-btn:hover { background: var(--primary); color: white; }
       `}</style>
         </div>
     );
