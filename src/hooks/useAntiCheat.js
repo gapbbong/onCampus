@@ -16,7 +16,7 @@ export const useAntiCheat = (isActive = true) => {
 
     // 1. Duplicate Tab Detection
     const channel = new BroadcastChannel('oncampus_monitor');
-    
+
     // Send check message
     channel.postMessage({ type: 'CHECK_DUPLICATE' });
 
@@ -51,16 +51,28 @@ export const useAntiCheat = (isActive = true) => {
       }
     };
 
+    const handleFocus = () => {
+      // Auto-recover if it was just a focus/blur violation
+      if (violationType === 'blur') {
+        setIsViolation(false);
+        setViolationType(null);
+      }
+    };
+
     document.addEventListener('visibilitychange', handleVisibilityChange);
     window.addEventListener('blur', handleBlur);
+    window.addEventListener('focus', handleFocus);
     document.addEventListener('fullscreenchange', handleFullscreenChange);
 
     return () => {
       channel.close();
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('blur', handleBlur);
+      window.removeEventListener('focus', handleFocus);
       document.removeEventListener('fullscreenchange', handleFullscreenChange);
     };
+
+
   }, [isActive, handleDuplicate]);
 
   const requestFullscreen = async () => {

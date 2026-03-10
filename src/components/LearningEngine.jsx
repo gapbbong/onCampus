@@ -13,46 +13,90 @@ const LearningEngine = ({ studentData, curriculum, questions, onComplete }) => {
     const [typingStats, setTypingStats] = useState([]); // Accuracy per round
 
     const { isViolation, violationType, isBlackout, requestFullscreen } = useAntiCheat(true);
+    const theoryRef = useRef(null);
+    const textareaRef = useRef(null);
 
     // Constants from curriculum
     const targetRepetitions = curriculum.typing_repetitions || 2;
     const targetAccuracy = curriculum.min_similarity || 0.93;
 
-    // Calculate similarity
+    // Intelligent similarity calculation (Levenshtein Distance)
     const calculateAccuracy = (input, target) => {
         if (!target) return 0;
-        let matches = 0;
-        const minLength = Math.min(input.length, target.length);
-        for (let i = 0; i < minLength; i++) {
-            if (input[i] === target[i]) matches++;
+
+        const normalize = (str) => str.replace(/\s+/g, '').toLowerCase();
+        const s1 = normalize(input);
+        const s2 = normalize(target);
+
+        if (s1.length === 0) return 0;
+        if (s2.length === 0) return 0;
+
+        // Optimized Levenshtein distance
+        const track = Array(s2.length + 1).fill(null).map(() => Array(s1.length + 1).fill(null));
+        for (let i = 0; i <= s1.length; i += 1) track[0][i] = i;
+        for (let j = 0; j <= s2.length; j += 1) track[j][0] = j;
+
+        for (let j = 1; j <= s2.length; j += 1) {
+            for (let i = 1; i <= s1.length; i += 1) {
+                const indicator = s1[i - 1] === s2[j - 1] ? 0 : 1;
+                track[j][i] = Math.min(
+                    track[j][i - 1] + 1, // insertion
+                    track[j - 1][i] + 1, // deletion
+                    track[j - 1][i - 1] + indicator // substitution
+                );
+            }
         }
-        return matches / target.length;
+
+        const distance = track[s2.length][s1.length];
+        const maxLength = Math.max(s1.length, s2.length);
+        return (maxLength - distance) / maxLength;
     };
 
     const currentAccuracy = calculateAccuracy(inputText, curriculum.typing_text);
 
+    // Sync scroll of both panels (Line-by-line)
+    useEffect(() => {
+        if (theoryRef.current && textareaRef.current && currentStep === 'typing') {
+            const currentIndex = inputText.length;
+            const targetSpan = theoryRef.current.children[currentIndex];
+
+            if (targetSpan) {
+                const theoryBox = theoryRef.current;
+                const style = getComputedStyle(theoryBox);
+                const lineHeight = parseFloat(style.lineHeight);
+                const paddingTop = parseFloat(style.paddingTop);
+
+                // Position the current line as the 3rd line in the view
+                // We want: targetSpan.offsetTop - scrollTop = paddingTop + (2 * lineHeight)
+                // So: scrollTop = targetSpan.offsetTop - (paddingTop + (2 * lineHeight))
+                const scrollTarget = targetSpan.offsetTop - (paddingTop + (2 * lineHeight));
+
+                const finalScroll = Math.max(0, scrollTarget);
+
+                // Synchronize both panels
+                const scrollOptions = {
+                    top: finalScroll,
+                    behavior: 'smooth'
+                };
+
+                theoryBox.scrollTo(scrollOptions);
+                textareaRef.current.scrollTo(scrollOptions);
+            }
+        }
+    }, [inputText, currentStep]);
+
+
     const handleTypingNext = () => {
         if (currentAccuracy < targetAccuracy) {
-            alert(`일치율이 ${(targetAccuracy * 100).toFixed(0)}% 미만입니다. 더 정확하게 입력해주세요!`);
+            alert(`일치율이 ${(targetAccuracy * 100).toFixed(0)}% 미만입니다. 공백을 제외한 실제 글자를 더 정확하게 입력해주세요!`);
             return;
         }
 
         setTypingStats([...typingStats, currentAccuracy]);
 
-        // Check for Skip Logic (If 1st round is done and they are "smart")
-        // Note: The user said "1회 완료 후 주관식 단답형 90% 이상 정답 시 2회 수행으로 간주"
-        // This usually means we check the quiz result IF we moved from quiz back to typing?
-        // Or maybe the quiz comes first? Let's check the user request.
-        // "필기 단계 -> 문제풀이 단계" 순서 같은데, "Skip 로직: 1회 완료 후 주관식 단답형 90% 이상 정답 시 2회 수행으로 간주"
-        // This implies if they did 1 round, we might let them skip the 2nd round if they perform well in quiz.
-        // I'll implement it so after Round 1, they go to Quiz, then if quiz > 90%, they are done.
-
         if (typingRound < targetRepetitions) {
             setTypingRound(typingRound + 1);
             setInputText('');
-            // Move to quiz after 1st round to check for skip? 
-            // User said: "1회 완료 후 주관식 단답형 90% 이상 정답 시 2회 수행으로 간주하고 즉시 통과"
-            // So: Typing R1 -> Quiz -> If Quiz > 90% -> Finish. Else -> Typing R2.
             setCurrentStep('quiz');
         } else {
             onComplete({ temperature, typingStats, results });
@@ -63,13 +107,12 @@ const LearningEngine = ({ studentData, curriculum, questions, onComplete }) => {
         setResults(quizResults);
         const score = quizResults.filter(r => r.correct).length / quizResults.length;
 
-        // Bonus for Fast Pass (Genius Bonus)
         if (typingRound === 1 && score >= 0.9) {
-            setTemperature(prev => prev + 50); // Big boost
+            setTemperature(prev => prev + 50);
             alert("천재 보너스! 단답형 고득점으로 2회 필기를 면제받았습니다.");
             onComplete({ temperature: temperature + 50, typingStats, results: quizResults });
         } else if (typingRound < targetRepetitions) {
-            setCurrentStep('typing'); // Go back for R2
+            setCurrentStep('typing');
         } else {
             onComplete({ temperature, typingStats, results: quizResults });
         }
@@ -126,15 +169,15 @@ const LearningEngine = ({ studentData, curriculum, questions, onComplete }) => {
                             initial={{ opacity: 0, x: 20 }}
                             animate={{ opacity: 1, x: 0 }}
                             exit={{ opacity: 0, x: -20 }}
-                            className="step-container"
+                            className="step-container typing"
                         >
                             <div className="step-header">
                                 <h2><Award /> 따라쓰기 ({typingRound}/{targetRepetitions})</h2>
-                                <p>제시된 문장을 정확하게 따라 써보세요. (일치율 목표: {(targetAccuracy * 100).toFixed(0)}%)</p>
+                                <p>제시된 문장을 정확하게 따라 써보세요. (공백 제외 일치율 목표: {(targetAccuracy * 100).toFixed(0)}%)</p>
                             </div>
 
                             <div className="typing-area glass-card">
-                                <div className="target-text">
+                                <div className="target-text" ref={theoryRef}>
                                     {curriculum.typing_text.split('').map((char, i) => (
                                         <span key={i} className={inputText[i] ? (inputText[i] === char ? 'correct' : 'incorrect') : ''}>
                                             {char}
@@ -142,12 +185,14 @@ const LearningEngine = ({ studentData, curriculum, questions, onComplete }) => {
                                     ))}
                                 </div>
                                 <textarea
+                                    ref={textareaRef}
                                     value={inputText}
                                     onChange={(e) => setInputText(e.target.value)}
-                                    placeholder="위 문장을 그대로 입력하세요..."
+                                    placeholder="위 내용을 그대로 입력하세요..."
                                     autoFocus
                                 />
                             </div>
+
 
                             <div className="step-footer">
                                 <div className="accuracy-badge">
@@ -160,8 +205,9 @@ const LearningEngine = ({ studentData, curriculum, questions, onComplete }) => {
                                     className={`next-button ${currentAccuracy >= targetAccuracy ? 'premium-gradient' : 'disabled'}`}
                                     disabled={currentAccuracy < targetAccuracy}
                                 >
-                                    {typingRound < targetRepetitions ? '문제 풀러 가기' : '완료하기'} <ArrowRight size={18} />
+                                    제출하기 <ArrowRight size={18} />
                                 </button>
+
                             </div>
                         </motion.div>
                     ) : (
@@ -204,8 +250,12 @@ const LearningEngine = ({ studentData, curriculum, questions, onComplete }) => {
         }
 
         .step-container {
-          max-width: 900px;
+          max-width: 1200px;
           margin: 0 auto;
+        }
+
+        .step-container.typing {
+          max-width: 1400px;
         }
 
         .step-header h2 {
@@ -222,36 +272,53 @@ const LearningEngine = ({ studentData, curriculum, questions, onComplete }) => {
         }
 
         .typing-area {
-          padding: 2.5rem;
+          display: flex;
+          gap: 2rem;
+          padding: 2rem;
           margin-bottom: 2rem;
+          align-items: stretch;
+          min-height: 500px;
         }
 
         .target-text {
-          font-size: 1.5rem;
+          flex: 1;
+          position: relative;
+          font-size: 1.25rem;
           font-weight: 500;
           line-height: 1.8;
-          margin-bottom: 2rem;
-          padding: 1.5rem;
+          padding: 2rem;
           background: rgba(255, 255, 255, 0.03);
           border-radius: 0.75rem;
           letter-spacing: 0.05em;
+          white-space: pre-wrap;
+          text-align: left;
+          overflow-y: auto;
+          max-height: 600px;
         }
 
         .target-text span.correct { color: var(--success); }
         .target-text span.incorrect { color: var(--error); background: rgba(239, 68, 68, 0.2); }
 
         textarea {
-          width: 100%;
-          height: 150px;
+          flex: 1;
+          height: 600px; /* Match max-height of target-text */
           background: rgba(0, 0, 0, 0.2);
           border: 1px solid var(--glass-border);
           border-radius: 0.75rem;
-          padding: 1.5rem;
+          padding: 2rem;
           color: white;
-          font-size: 1.5rem;
+          font-family: inherit;
+          font-size: 1.25rem;
+          font-weight: 500;
+          letter-spacing: 0.05em; /* Critical for sync */
           resize: none;
           transition: border-color 0.2s;
+          white-space: pre-wrap;
+          line-height: 1.8;
+          overflow-y: auto;
         }
+
+
 
         textarea:focus {
           outline: none;
@@ -368,10 +435,37 @@ const QuizComponent = ({ questions, onComplete, temperature, setTemperature }) =
                 </div>
             </div>
 
+            {showExplanation && (
+                <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="explanation-card glass-card"
+                >
+                    <div className="explanation-header">
+                        {answers[currentIndex] === currentQ.answer ? (
+                            <span className="success-text"><CheckCircle2 size={18} /> 정답입니다!</span>
+                        ) : (
+                            <span className="error-text"><AlertTriangle size={18} /> 오답입니다.</span>
+                        )}
+                    </div>
+                    <p className="explanation-text">{currentQ.explanation}</p>
+                </motion.div>
+            )}
+
             <div className="step-footer">
-                <button className="next-button premium-gradient" onClick={handleNext}>
-                    {currentIndex < questions.length - 1 ? '다음 문제' : '결과 제출'} <ArrowRight size={18} />
-                </button>
+                {!showExplanation ? (
+                    <button
+                        className={`next-button ${answers[currentIndex] ? 'premium-gradient' : 'disabled'}`}
+                        disabled={!answers[currentIndex]}
+                        onClick={() => setShowExplanation(true)}
+                    >
+                        정답 확인 <ArrowRight size={18} />
+                    </button>
+                ) : (
+                    <button className="next-button premium-gradient" onClick={handleNext}>
+                        {currentIndex < questions.length - 1 ? '다음 문제' : '결과 제출'} <ArrowRight size={18} />
+                    </button>
+                )}
             </div>
 
             <style>{`
@@ -401,6 +495,24 @@ const QuizComponent = ({ questions, onComplete, temperature, setTemperature }) =
           color: white;
           font-size: 1.25rem;
         }
+
+        .explanation-card {
+          margin-top: 1.5rem;
+          padding: 1.5rem;
+          border-left: 4px solid var(--primary);
+        }
+
+        .explanation-header {
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+          margin-bottom: 0.5rem;
+          font-weight: 600;
+        }
+
+        .success-text { color: var(--success); display: flex; align-items: center; gap: 0.5rem; }
+        .error-text { color: var(--error); display: flex; align-items: center; gap: 0.5rem; }
+        .explanation-text { color: var(--text-secondary); line-height: 1.5; }
       `}</style>
         </motion.div>
     );

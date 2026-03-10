@@ -8,7 +8,10 @@ import { Settings as SettingsIcon } from 'lucide-react';
 import './styles/index.css';
 
 function App() {
-  const [user, setUser] = useState(null);
+  const [user, setUser] = useState(() => {
+    const saved = localStorage.getItem('oncampus_student_user');
+    return saved ? JSON.parse(saved) : null;
+  });
   const [isTeacherMode, setIsTeacherMode] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [schoolSettings, setSchoolSettings] = useState(() => {
@@ -28,8 +31,11 @@ function App() {
   }, [schoolSettings]);
 
   const handleStudentLogin = (data) => {
-    setUser({ ...data, type: 'student', temperature: 0 });
+    const userData = { ...data, type: 'student', temperature: 0 };
+    setUser(userData);
+    localStorage.setItem('oncampus_student_user', JSON.stringify(userData));
   };
+
 
   const handleLearningComplete = (stats) => {
     alert('학습을 성공적으로 마쳤습니다! 온도와 점수가 저장되었습니다.');
