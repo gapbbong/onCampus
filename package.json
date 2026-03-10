@@ -45,9 +45,15 @@
       "dist/**/*",
       "electron/**/*"
     ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "gapbbong",
+        "repo": "onCampus"
+      }
+    ],
     "win": {
-      "target": "nsis",
-      "publish": null
+      "target": "nsis"
     }
   }
 }
