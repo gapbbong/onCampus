@@ -11,6 +11,7 @@ import './styles/index.css';
 // 구글 앱스 스크립트(GAS) 웹 앱 URL을 여기에 넣으세요!
 // ---------------------------------------------------------
 const GOOGLE_SHEET_URL = "https://script.google.com/macros/s/AKfycbytv9B8DqxTf65K0NgggHhlnaAqJYshGvzhHvWu_Pm7QewRgUFRKnxtGyzNtnxqWb03/exec";
+const SPREADSHEET_URL = "https://docs.google.com/spreadsheets/d/1w7eom3Uj6eHOV-F6bEQmHiFvloeW-2Qv5t7S5xj3ETU/edit?gid=0#gid=0";
 
 function App() {
   const [studentInfo, setStudentInfo] = useState(() => {
@@ -20,7 +21,10 @@ function App() {
 
   const [activeSession, setActiveSession] = useState(null);
   const [isTeacherMode, setIsTeacherMode] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
+  const [showSettings, setShowSettings] = useState(() => {
+    const saved = localStorage.getItem('oncampus_school_settings');
+    return !saved; // 설정이 없으면 자동으로 학교 설정부터 시작
+  });
   const [isIdle, setIsIdle] = useState(false);
 
   // --- Idle Detection (1 minute) ---
@@ -68,7 +72,7 @@ function App() {
     const info = { studentId: data.studentId, name: data.name };
     setStudentInfo(info);
     localStorage.setItem('oncampus_student_info', JSON.stringify(info));
-    setActiveSession({ ...info, subject: data.subject, temperature: 0 });
+    setActiveSession({ ...info, subject: data.subject, chapter: data.chapter, temperature: 0 });
   };
 
   const handleLogout = () => {
@@ -129,11 +133,14 @@ function App() {
     return (
       <LearningEngine
         studentData={activeSession}
-        curriculum={mockCurriculum[0]}
-        questions={mockCurriculum[0].questions}
+        curriculum={activeSession.chapter || mockCurriculum[0]}
+        questions={activeSession.chapter?.questions || mockCurriculum[0].questions}
         onComplete={handleLearningComplete}
         onBack={() => setActiveSession(null)}
         onLogout={handleLogout}
+        isTeacherMode={isTeacherMode}
+        setIsTeacherMode={setIsTeacherMode}
+        spreadsheetUrl={SPREADSHEET_URL}
       />
     );
   };
@@ -143,18 +150,14 @@ function App() {
       {renderContent()}
 
 
-      <div className="app-controls">
-        <button className="settings-toggle" onClick={() => setShowSettings(true)}>
-          <SettingsIcon size={20} />
-          <span className="school-name-badge">{schoolSettings.school_name}</span>
-        </button>
-
-        {(isTeacherMode || activeSession?.studentId === '7788' || studentInfo?.studentId === '7788') && (
-          <button className="mode-toggle" onClick={() => setIsTeacherMode(!isTeacherMode)}>
-            {isTeacherMode ? '학생 모드로 전환' : '교사 모드로 전환'}
+      {!activeSession && !isTeacherMode && (
+        <div className="app-controls">
+          <button className="settings-toggle" onClick={() => setShowSettings(true)}>
+            <SettingsIcon size={20} />
+            <span className="school-name-badge">{schoolSettings.school_name}</span>
           </button>
-        )}
-      </div>
+        </div>
+      )}
 
 
       {showSettings && (

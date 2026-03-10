@@ -2,6 +2,10 @@ const { app, BrowserWindow, globalShortcut, Menu } = require('electron');
 const path = require('path');
 const isDev = require('electron-is-dev');
 
+if (isDev) {
+    app.disableHardwareAcceleration();
+}
+
 let mainWindow;
 
 function createWindow() {
@@ -19,7 +23,7 @@ function createWindow() {
         }
     });
 
-    mainWindow.setContentProtection(true);
+    // mainWindow.setContentProtection(true);
 
     const url = isDev
         ? 'http://localhost:5173'
@@ -27,12 +31,21 @@ function createWindow() {
 
     mainWindow.loadURL(url);
 
+    if (isDev) {
+        mainWindow.webContents.openDevTools();
+    }
+
     const template = [
         {
             label: '편집(Edit)',
             submenu: [
                 { role: 'undo', label: '되돌리기' },
-                { role: 'redo', label: '다시 실행' }
+                { role: 'redo', label: '다시 실행' },
+                { type: 'separator' },
+                { role: 'cut', label: '오려두기' },
+                { role: 'copy', label: '복사하기' },
+                { role: 'paste', label: '붙여넣기' },
+                { role: 'selectAll', label: '전체 선택' }
             ]
         }
     ];

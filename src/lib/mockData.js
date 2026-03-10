@@ -12,6 +12,7 @@ export const mockCurriculum = [
         category: 'Ⅰ. 빅데이터와 4차 산업혁명',
         typing_repetitions: 2,
         min_similarity: 0.93,
+        material_url: 'https://notebooklm.google.com/notebook/32e06827-78d6-495d-8531-d6778716d7a7?artifactId=36770b87-a59a-46fc-bd63-1cb209c707ba',
         typing_text: `빅데이터는 단순히 양이 많은 데이터가 아니라 기존 방식으로 처리하기 힘든 거대한 데이터 집합을 의미합니다. 5V 특징인 방대한 규모(Volume), 빠른 속도(Velocity), 다양한 형태(Variety), 정확성(Veracity), 가치(Value)가 조화를 이룰 때 비로소 강력한 힘을 발휘합니다.
         
 데이터 분석 기술로는 회귀 분석, 텍스트 마이닝, 오피니언 마이닝, 소셜 네트워크 분석 등이 있으며, 이를 활용해 서울시 상권 분석이나 우버의 실시간 배차 관리 등 우리 실생활에 유용한 가치를 만들어냅니다.`,
@@ -25,6 +26,7 @@ export const mockCurriculum = [
         category: 'Ⅰ. 빅데이터와 4차 산업혁명',
         typing_repetitions: 2,
         min_similarity: 0.93,
+        material_url: 'https://notebooklm.google.com/notebook/32e06827-78d6-495d-8531-d6778716d7a7?artifactId=9a44755c-1b44-467c-b5e8-36fa0fc9d25b',
         typing_text: `4차 산업혁명은 인공지능, 빅데이터, 사물인터넷(IoT) 등 첨단 정보통신기술이 경제, 사회 전반에 융합되어 혁신적인 변화를 일으키는 차세대 산업혁명입니다. 초연결, 초지능, 초융합을 주요 특징으로 합니다.`,
         questions: [{ id: 'q1', type: 'multiple_choice', question_text: '4차 산업혁명의 주요 특징 3초(超)가 아닌 것은?', options: ['초연결', '초지능', '초속도', '초융합'], answer: '초속도', explanation: '3초는 초연결, 초지능, 초융합입니다.' }]
     },

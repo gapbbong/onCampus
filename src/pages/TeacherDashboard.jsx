@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Settings, Users, BookOpen, Sparkles, Plus, Save, Trash2, ArrowBigRight } from 'lucide-react';
-import { generateExplanation } from '../lib/gemini';
+import { Settings, Users, BookOpen, Sparkles, Plus, Save, Trash2, ArrowBigRight, Video, FileText, Link } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import '../styles/index.css';
 
@@ -9,6 +8,13 @@ const TeacherDashboard = ({ schoolData, initialCurriculum, apiKey }) => {
     const [curriculum, setCurriculum] = useState(initialCurriculum || []);
     const [isGenerating, setIsGenerating] = useState(false);
     const [activeStudents, setActiveStudents] = useState([]);
+
+    // Sync curriculum when props change (helpful for mock updates)
+    useEffect(() => {
+        if (initialCurriculum) {
+            setCurriculum(initialCurriculum);
+        }
+    }, [initialCurriculum]);
 
     // --- Real-time Student Monitoring ---
     useEffect(() => {
@@ -43,43 +49,9 @@ const TeacherDashboard = ({ schoolData, initialCurriculum, apiKey }) => {
         if (error) alert('신호 전송 실패!');
     };
 
-    const handleAddQuestion = (chapterId) => {
-        const newChapter = curriculum.map(ch => {
-            if (ch.id === chapterId) {
-                return {
-                    ...ch,
-                    questions: [...ch.questions, { id: Date.now(), question_text: '', answer: '', explanation: '', type: 'subjective' }]
-                };
-            }
-            return ch;
-        });
-        setCurriculum(newChapter);
-    };
-
-    const handleGenerateAI = async (chapterId, questionId) => {
-        setIsGenerating(true);
-        const chapter = curriculum.find(ch => ch.id === chapterId);
-        const question = chapter.questions.find(q => q.id === questionId);
-
-        if (!question.question_text || !question.answer) {
-            alert("문제와 정답을 입력해야 해설을 생성할 수 있습니다.");
-            setIsGenerating(false);
-            return;
-        }
-
-        const explanation = await generateExplanation(question.question_text, question.answer, apiKey);
-
-        const updatedCurriculum = curriculum.map(ch => {
-            if (ch.id === chapterId) {
-                return {
-                    ...ch,
-                    questions: ch.questions.map(q => q.id === questionId ? { ...q, explanation } : q)
-                };
-            }
-            return ch;
-        });
-        setCurriculum(updatedCurriculum);
-        setIsGenerating(false);
+    const handleOpenLink = (url) => {
+        if (url) window.open(url, '_blank');
+        else alert('등록된 링크가 없습니다.');
     };
 
     return (
@@ -110,47 +82,49 @@ const TeacherDashboard = ({ schoolData, initialCurriculum, apiKey }) => {
 
                 <section className="dashboard-content fade-in">
                     {activeTab === 'curriculum' && (
-                        <div className="curriculum-list">
-                            {curriculum.map(chapter => (
-                                <div key={chapter.id} className="chapter-card glass-card">
-                                    <div className="chapter-header">
-                                        <input
-                                            className="chapter-title"
-                                            value={chapter.title}
-                                            onChange={(e) => {/* update logic */ }}
-                                        />
-                                        <div className="chapter-meta">
-                                            <span>필기 반복: <input type="number" value={chapter.typing_repetitions} style={{ width: 40 }} />회</span>
-                                        </div>
-                                    </div>
-
-                                    <div className="question-list">
-                                        {chapter.questions.map(q => (
-                                            <div key={q.id} className="question-item">
-                                                <div className="q-inputs">
-                                                    <input placeholder="문제 내용" value={q.question_text} />
-                                                    <input placeholder="정답" value={q.answer} />
-                                                </div>
-                                                <div className="ai-explanation">
-                                                    <textarea
-                                                        placeholder="AI 해설 (자동 생성을 클릭하세요)"
-                                                        value={q.explanation}
-                                                        maxLength={50}
+                        <div className="curriculum-list-container">
+                            {Object.entries(
+                                curriculum.reduce((acc, item) => {
+                                    if (!acc[item.category]) acc[item.category] = [];
+                                    acc[item.category].push(item);
+                                    return acc;
+                                }, {})
+                            ).map(([category, chapters]) => (
+                                <div key={category} className="curriculum-category-group">
+                                    <h3 className="category-title-badge">
+                                        <BookOpen size={18} /> {category}
+                                    </h3>
+                                    <div className="category-card-grid">
+                                        {chapters.map(chapter => (
+                                            <div key={chapter.id} className="chapter-card glass-card">
+                                                <div className="chapter-info">
+                                                    <input
+                                                        className="chapter-title"
+                                                        value={chapter.title}
+                                                        onChange={() => { }}
+                                                        readOnly
                                                     />
-                                                    <button
-                                                        className="ai-btn"
-                                                        onClick={() => handleGenerateAI(chapter.id, q.id)}
-                                                        disabled={isGenerating}
-                                                    >
-                                                        <Sparkles size={14} /> AI 생성
-                                                    </button>
+                                                    <div className="material-link-input">
+                                                        <input
+                                                            className="clickable-link-input"
+                                                            placeholder="설명 자료 URL (클릭하여 열기)"
+                                                            value={chapter.material_url || ''}
+                                                            onClick={(e) => {
+                                                                if (e.target.value) handleOpenLink(e.target.value);
+                                                            }}
+                                                            onChange={(e) => {
+                                                                const newCurriculum = curriculum.map(c =>
+                                                                    c.id === chapter.id ? { ...c, material_url: e.target.value } : c
+                                                                );
+                                                                setCurriculum(newCurriculum);
+                                                            }}
+                                                            title="클릭하여 링크 열기"
+                                                        />
+                                                    </div>
                                                 </div>
                                             </div>
                                         ))}
                                     </div>
-                                    <button className="add-q-btn" onClick={() => handleAddQuestion(chapter.id)}>
-                                        <Plus size={16} /> 문제 추가
-                                    </button>
                                 </div>
                             ))}
                         </div>
@@ -189,11 +163,11 @@ const TeacherDashboard = ({ schoolData, initialCurriculum, apiKey }) => {
                                             </td>
                                             <td>
                                                 <button
-                                                    className="skip-btn"
+                                                    className="skip-btn premium-gradient"
                                                     onClick={() => handleForceNext(student.student_id)}
                                                     title="다음 단계로 강제 이동"
                                                 >
-                                                    <ArrowBigRight size={16} /> 단계 넘기기
+                                                    <ArrowBigRight size={16} /> 강제 패스
                                                 </button>
                                             </td>
                                         </tr>

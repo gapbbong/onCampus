@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Thermometer, Award, ArrowRight, ArrowLeft, CheckCircle2, AlertTriangle, ShieldCheck, LogOut } from 'lucide-react';
+import { Thermometer, Award, ArrowRight, ArrowLeft, CheckCircle2, AlertTriangle, ShieldCheck, LogOut, LayoutDashboard, Table, ExternalLink, Play } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAntiCheat } from '../hooks/useAntiCheat';
 import { supabase } from '../lib/supabase';
 
-const LearningEngine = ({ studentData, curriculum, questions, onComplete, onBack }) => {
+const LearningEngine = ({ studentData, curriculum, questions, onComplete, onBack, isTeacherMode, setIsTeacherMode, spreadsheetUrl }) => {
     const [currentStep, setCurrentStep] = useState('typing'); // 'typing' or 'quiz'
     const [typingRound, setTypingRound] = useState(1);
     const [inputText, setInputText] = useState('');
@@ -13,17 +13,46 @@ const LearningEngine = ({ studentData, curriculum, questions, onComplete, onBack
     const [results, setResults] = useState([]); // Quiz results
     const [typingStats, setTypingStats] = useState([]); // Accuracy per round
 
-    const { isViolation, violationType, isBlackout, requestFullscreen } = useAntiCheat(true);
-    const theoryRef = useRef(null);
-    const textareaRef = useRef(null);
-
-    // Constants from curriculum
+    // --- Constants from curriculum ---
     const targetRepetitions = curriculum.typing_repetitions || 2;
     const targetAccuracy = curriculum.min_similarity || 0.93;
 
+    // Intelligent similarity calculation (Levenshtein Distance)
+    const calculateAccuracy = (input, target) => {
+        if (!target) return 0;
+        const normalize = (str) => str.replace(/\s+/g, '').toLowerCase();
+        const s1 = normalize(input);
+        const s2 = normalize(target);
+        if (s1.length === 0 || s2.length === 0) return 0;
+
+        const track = Array(s2.length + 1).fill(null).map(() => Array(s1.length + 1).fill(null));
+        for (let i = 0; i <= s1.length; i += 1) track[0][i] = i;
+        for (let j = 0; j <= s2.length; j += 1) track[j][0] = j;
+        for (let j = 1; j <= s2.length; j += 1) {
+            for (let i = 1; i <= s1.length; i += 1) {
+                const indicator = s1[i - 1] === s2[j - 1] ? 0 : 1;
+                track[j][i] = Math.min(track[j][i - 1] + 1, track[j - 1][i] + 1, track[j - 1][i - 1] + indicator);
+            }
+        }
+        const distance = track[s2.length][s1.length];
+        const maxLength = Math.max(s1.length, s2.length);
+        return (maxLength - distance) / maxLength;
+    };
+
+    const currentAccuracy = calculateAccuracy(inputText, curriculum.typing_text);
+    const isTestAccount = String(studentData.studentId) === '7788' && studentData.name === '홍길동';
+
+    // DEBUG LOG
+    useEffect(() => {
+        console.log("[LearningEngine] isTestAccount:", isTestAccount, studentData);
+    }, [isTestAccount, studentData]);
+
+    const { isViolation, violationType, isBlackout, requestFullscreen } = useAntiCheat(!isTestAccount);
+    const theoryRef = useRef(null);
+    const textareaRef = useRef(null);
+
     // --- Real-time Session Sync & Global Event Blockers ---
     useEffect(() => {
-        const isTestAccount = studentData.studentId === '7788' && studentData.name === '홍길동';
 
         // Block event handler
         const handlePrevention = (e) => {
@@ -36,8 +65,10 @@ const LearningEngine = ({ studentData, curriculum, questions, onComplete, onBack
         // Keydown handler to block Ctrl+C, Ctrl+V, etc.
         const handleKeyDown = (e) => {
             if (isTestAccount) return;
-            if ((e.ctrlKey || e.metaKey) && (e.key === 'c' || e.key === 'v' || e.key === 'x')) {
+            const isCopyPaste = (e.ctrlKey || e.metaKey) && ['c', 'v', 'x'].includes(e.key.toLowerCase());
+            if (isCopyPaste) {
                 e.preventDefault();
+                e.stopPropagation();
             }
         };
 
@@ -47,84 +78,60 @@ const LearningEngine = ({ studentData, curriculum, questions, onComplete, onBack
         window.addEventListener('keydown', handleKeyDown);
 
         const updateSession = async () => {
-            const { error } = await supabase
-                .from('active_sessions')
-                .upsert({
-                    student_id: studentData.studentId,
-                    student_name: studentData.name,
-                    subject: curriculum.title,
-                    current_step: currentStep,
-                    current_round: typingRound,
-                    accuracy: currentAccuracy,
-                    last_active: new Date().toISOString()
-                }, { onConflict: 'student_id' });
+            if (!supabase || typeof supabase.from !== 'function') return;
+            try {
+                await supabase
+                    .from('active_sessions')
+                    .upsert({
+                        student_id: studentData.studentId,
+                        student_name: studentData.name,
+                        subject: curriculum.title,
+                        current_step: currentStep,
+                        current_round: typingRound,
+                        accuracy: currentAccuracy,
+                        last_active: new Date().toISOString()
+                    }, { onConflict: 'student_id' });
+            } catch (err) {
+                console.error("Supabase sync failed:", err);
+            }
         };
 
-        const interval = setInterval(updateSession, 5000);
+        const interval = setInterval(updateSession, 10000);
         updateSession();
 
-        const channel = supabase
-            .channel(`session_${studentData.studentId}`)
-            .on('postgres_changes', {
-                event: 'UPDATE',
-                schema: 'public',
-                table: 'active_sessions',
-                filter: `student_id=eq.${studentData.studentId}`
-            }, (payload) => {
-                if (payload.new.force_next_signal) {
-                    if (currentStep === 'typing') {
-                        handleTypingNext(true);
-                    } else if (currentStep === 'quiz') {
-                        onComplete({ temperature: temperature + 10, typingStats: [...typingStats, 1], results: results.length ? results : [{ correct: true }] });
+        let channel = null;
+        if (supabase && typeof supabase.channel === 'function') {
+            channel = supabase
+                .channel(`session_${studentData.studentId}`)
+                .on('postgres_changes', {
+                    event: 'UPDATE',
+                    schema: 'public',
+                    table: 'active_sessions',
+                    filter: `student_id=eq.${studentData.studentId}`
+                }, (payload) => {
+                    if (payload.new.force_next_signal) {
+                        if (currentStep === 'typing') {
+                            handleTypingNext(true);
+                        } else if (currentStep === 'quiz') {
+                            onComplete({ temperature: temperature + 10, typingStats: [...typingStats, 1], results: results.length ? results : [{ correct: true }] });
+                        }
+                        supabase.from('active_sessions').update({ force_next_signal: false }).eq('student_id', studentData.studentId).then();
                     }
-                    supabase.from('active_sessions').update({ force_next_signal: false }).eq('student_id', studentData.studentId).then();
-                }
-            })
-            .subscribe();
+                })
+                .subscribe();
+        }
 
         return () => {
             clearInterval(interval);
-            supabase.removeChannel(channel);
+            if (channel && supabase && typeof supabase.removeChannel === 'function') {
+                supabase.removeChannel(channel);
+            }
             window.removeEventListener('paste', handlePrevention);
             window.removeEventListener('copy', handlePrevention);
             window.removeEventListener('contextmenu', handlePrevention);
             window.removeEventListener('keydown', handleKeyDown);
         };
     }, [currentStep, typingRound, currentAccuracy, studentData]);
-
-    // Intelligent similarity calculation (Levenshtein Distance)
-    const calculateAccuracy = (input, target) => {
-        if (!target) return 0;
-
-        const normalize = (str) => str.replace(/\s+/g, '').toLowerCase();
-        const s1 = normalize(input);
-        const s2 = normalize(target);
-
-        if (s1.length === 0) return 0;
-        if (s2.length === 0) return 0;
-
-        // Optimized Levenshtein distance
-        const track = Array(s2.length + 1).fill(null).map(() => Array(s1.length + 1).fill(null));
-        for (let i = 0; i <= s1.length; i += 1) track[0][i] = i;
-        for (let j = 0; j <= s2.length; j += 1) track[j][0] = j;
-
-        for (let j = 1; j <= s2.length; j += 1) {
-            for (let i = 1; i <= s1.length; i += 1) {
-                const indicator = s1[i - 1] === s2[j - 1] ? 0 : 1;
-                track[j][i] = Math.min(
-                    track[j][i - 1] + 1, // insertion
-                    track[j - 1][i] + 1, // deletion
-                    track[j - 1][i - 1] + indicator // substitution
-                );
-            }
-        }
-
-        const distance = track[s2.length][s1.length];
-        const maxLength = Math.max(s1.length, s2.length);
-        return (maxLength - distance) / maxLength;
-    };
-
-    const currentAccuracy = calculateAccuracy(inputText, curriculum.typing_text);
 
     // Sync scroll of both panels (Line-by-line)
     useEffect(() => {
@@ -235,10 +242,33 @@ const LearningEngine = ({ studentData, curriculum, questions, onComplete, onBack
                     </div>
                 </div>
                 <div className="nav-right">
-                    <span className="student-name">{studentData.name} ({studentData.studentId})</span>
-                    <button onClick={onBack} className="nav-logout-btn" title="로그아웃">
-                        <LogOut size={16} />
-                    </button>
+                    <div className="nav-user-info">
+                        <div className="student-badge-row">
+                            <span className="student-name">{studentData.name} ({studentData.studentId})</span>
+                            <button onClick={onBack} className="nav-logout-btn" title="로그아웃">
+                                <LogOut size={16} />
+                            </button>
+                        </div>
+
+                        {(isTeacherMode || isTestAccount) && (
+                            <div className="admin-quick-actions">
+                                <button
+                                    className="admin-action-btn teacher"
+                                    onClick={() => setIsTeacherMode(!isTeacherMode)}
+                                >
+                                    <LayoutDashboard size={14} />
+                                    {isTeacherMode ? '학생 모드로 전환' : '교사 모드로 전환'}
+                                </button>
+                                <button
+                                    className="admin-action-btn sheet"
+                                    onClick={() => window.open(spreadsheetUrl, '_blank')}
+                                >
+                                    <Table size={14} />
+                                    구글 시트 열기
+                                </button>
+                            </div>
+                        )}
+                    </div>
                 </div>
             </nav>
 
@@ -253,8 +283,18 @@ const LearningEngine = ({ studentData, curriculum, questions, onComplete, onBack
                             className="step-container typing"
                         >
                             <div className="step-header">
-                                <h2><Award /> 따라쓰기 ({typingRound}/{targetRepetitions})</h2>
-                                <p>제시된 문장을 정확하게 따라 써보세요. (공백 제외 일치율 목표: {(targetAccuracy * 100).toFixed(0)}%)</p>
+                                <div className="header-text">
+                                    <h2><Award /> 따라쓰기 ({typingRound}/{targetRepetitions})</h2>
+                                    <p>제시된 문장을 정확하게 따라 써보세요. (공백 제외 일치율 목표: {(targetAccuracy * 100).toFixed(0)}%)</p>
+                                </div>
+                                {curriculum.material_url && (
+                                    <button
+                                        className="material-btn"
+                                        onClick={() => window.open(curriculum.material_url, '_blank')}
+                                    >
+                                        <Play size={14} /> 학습 자료 보기 (PPT/영상)
+                                    </button>
+                                )}
                             </div>
 
                             <div className="typing-area glass-card">
@@ -460,6 +500,8 @@ const LearningEngine = ({ studentData, curriculum, questions, onComplete, onBack
           line-height: 1.8;
           padding: 2rem;
           background: rgba(255, 255, 255, 0.03);
+          user-select: text !important;
+          -webkit-user-select: text !important;
           border-radius: 0.75rem;
           letter-spacing: 0.05em;
           white-space: pre-wrap;
